@@ -1,0 +1,14 @@
+node_modules/
+.turbo/
+.next/
+.vercel/
+dist/
+coverage/
+uploads/
+storage/
+apps/server/.env
+apps/web/.env.local
+*.log
+*.tsbuildinfo
+__pycache__/
+*.pyc

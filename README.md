@@ -1,143 +1,264 @@
-# Reliable Recording Chunking Pipeline
+# Swades AI Hackathon
 
-An assignment for building a reliable chunking setup that ensures recording data stays accurate in all cases — no data loss, no silent failures.
+Local-first reliable audio chunk recording with:
 
-## How It Works
+- Next.js frontend
+- Hono API server
+- PostgreSQL for session + chunk metadata
+- OPFS browser storage for zero-loss chunk buffering
+- Local filesystem uploads
+- Local Whisper transcription through Python
 
+## What This Build Does
+
+1. Records microphone or tab audio in the browser
+2. Saves each finalized 15 second chunk into OPFS immediately
+3. Uploads chunks to the local backend with max concurrency of 3
+4. Deletes chunks from OPFS only after upload + DB ack succeed
+5. Reconciles missing chunks every 15 seconds after refresh/reconnect
+6. Stores uploaded chunk files on disk under `apps/server/uploads/<sessionId>/`
+7. Transcribes uploaded chunks locally with Whisper
+8. Rebuilds the session transcript from chunk transcripts
+
+## Current Deployment Reality
+
+This repo is ready for local demo use.
+
+Frontend:
+- can be deployed to Vercel
+
+Backend:
+- is **not** Vercel-ready in its current form
+- depends on local filesystem persistence and local Python Whisper execution
+- should be run locally or on a separate persistent server/VM
+
+If you deploy the frontend to Vercel later, point it to a separately hosted backend.
+
+## Requirements
+
+Install these on your machine:
+
+- Node.js 22+
+- PostgreSQL
+- Python 3.11+
+
+Python packages:
+
+```bash
+pip install openai-whisper imageio-ffmpeg
 ```
-Client (Browser)
-    │
-    ├── 1. Record & chunk data on the client side
-    ├── 2. Store chunks in OPFS (Origin Private File System)
-    ├── 3. Upload chunks to a storage bucket
-    ├── 4. On success → acknowledge (ack) to the database
-    │
-    └── Recovery: if DB has ack but chunk is missing from bucket
-        └── Re-send from OPFS → bucket
+
+## Environment Files
+
+### Backend
+
+Create [apps/server/.env](e:/Swades-AI-Hackathon/apps/server/.env) from [apps/server/.env.example](e:/Swades-AI-Hackathon/apps/server/.env.example)
+
+```env
+DATABASE_URL=postgresql://postgres:password@localhost:5432/my-better-t-app
+CORS_ORIGIN=http://localhost:3001
+PORT=3000
+STORAGE_ROOT=.
+PYTHON_PATH=python
+WHISPER_MODEL=base
 ```
 
-**Main objective:** In all cases, the recording data stays accurate. OPFS acts as the durable client-side buffer — chunks are only cleared after the bucket and DB are both confirmed in sync.
+Notes:
+- Replace `password` with your PostgreSQL password
+- `WHISPER_MODEL=base` is the default local Whisper model
 
-### Flow Details
+### Frontend
 
-1. **Client-side chunking** — Recording data is split into chunks in the browser
-2. **OPFS storage** — Each chunk is persisted to the Origin Private File System before any network call, so nothing is lost if the tab closes or the network drops
-3. **Bucket upload** — Chunks are uploaded to a storage bucket (can be a local bucket for testing, e.g. MinIO or a local S3-compatible store)
-4. **DB acknowledgment** — Once the bucket confirms receipt, an ack record is written to the database
-5. **Reconciliation** — If the DB shows an ack but the chunk is missing from the bucket (e.g. bucket purge, replication lag), the client re-uploads from OPFS to restore consistency
+Create [apps/web/.env.local](e:/Swades-AI-Hackathon/apps/web/.env.local) from [apps/web/.env.local.example](e:/Swades-AI-Hackathon/apps/web/.env.local.example)
 
-## Tech Stack
+```env
+NEXT_PUBLIC_SERVER_URL=http://localhost:3000
+```
 
-- **Next.js** — Frontend (App Router)
-- **Hono** — Backend API server
-- **Bun** — Runtime
-- **Drizzle ORM + PostgreSQL** — Database
-- **TailwindCSS + shadcn/ui** — UI
-- **Turborepo** — Monorepo build system
+The frontend also falls back to `http://localhost:3000` automatically if this file is missing.
 
-## Getting Started
+## Local Setup
+
+### 1. Install dependencies
 
 ```bash
 npm install
 ```
 
-### Database Setup
+### 2. Create PostgreSQL database
 
-1. Make sure you have a PostgreSQL database set up.
-2. Update your `apps/server/.env` with your PostgreSQL connection details.
-3. Apply the schema:
+Open `psql` and run:
+
+```sql
+CREATE DATABASE "my-better-t-app";
+```
+
+### 3. Push schema
 
 ```bash
 npm run db:push
 ```
 
-### Run Development
+### 4. Start backend
 
 ```bash
-npm run dev
+npm run dev:server
 ```
 
-- Web app: [http://localhost:3001](http://localhost:3001)
-- API server: [http://localhost:3000](http://localhost:3000)
+Backend runs on:
 
-## Load Testing
-
-Target: **300,000 requests** to validate the chunking pipeline under heavy load.
-
-### Setup
-
-Use a load testing tool like [k6](https://k6.io), [autocannon](https://github.com/mcollina/autocannon), or [artillery](https://artillery.io) to simulate concurrent chunk uploads.
-
-Example with **k6**:
-
-```js
-import http from "k6/http";
-import { check } from "k6";
-
-export const options = {
-  scenarios: {
-    chunk_uploads: {
-      executor: "constant-arrival-rate",
-      rate: 5000,           // 5,000 req/s
-      timeUnit: "1s",
-      duration: "1m",       // → 300K requests in 60s
-      preAllocatedVUs: 500,
-      maxVUs: 1000,
-    },
-  },
-};
-
-export default function () {
-  const payload = JSON.stringify({
-    chunkId: `chunk-${__VU}-${__ITER}`,
-    data: "x".repeat(1024), // 1KB dummy chunk
-  });
-
-  const res = http.post("http://localhost:3000/api/chunks/upload", payload, {
-    headers: { "Content-Type": "application/json" },
-  });
-
-  check(res, {
-    "status 200": (r) => r.status === 200,
-  });
-}
+```text
+http://localhost:3000
 ```
 
-Run:
+### 5. Start frontend
+
+In another terminal:
 
 ```bash
-k6 run load-test.js
+npm run dev:web
 ```
 
-### What to Validate
+Frontend runs on:
 
-- **No data loss** — every ack in the DB has a matching chunk in the bucket
-- **OPFS recovery** — chunks survive client disconnects and can be re-uploaded
-- **Throughput** — server handles sustained 5K req/s without dropping chunks
-- **Consistency** — reconciliation catches and repairs any bucket/DB mismatches after the run
-
-## Project Structure
-
-```
-recoding-assignment/
-├── apps/
-│   ├── web/         # Frontend (Next.js) — chunking, OPFS, upload logic
-│   └── server/      # Backend API (Hono) — bucket upload, DB ack
-├── packages/
-│   ├── ui/          # Shared shadcn/ui components and styles
-│   ├── db/          # Drizzle ORM schema & queries
-│   ├── env/         # Type-safe environment config
-│   └── config/      # Shared TypeScript config
+```text
+http://localhost:3001
 ```
 
-## Available Scripts
+## Mentor Demo Commands
 
-- `npm run dev` — Start all apps in development mode
-- `npm run build` — Build all apps
-- `npm run dev:web` — Start only the web app
-- `npm run dev:server` — Start only the server
-- `npm run check-types` — TypeScript type checking
-- `npm run db:push` — Push schema changes to database
-- `npm run db:generate` — Generate database client/types
-- `npm run db:migrate` — Run database migrations
-- `npm run db:studio` — Open database studio UI
+From repo root:
+
+```bash
+npm install
+pip install openai-whisper imageio-ffmpeg
+```
+
+Create:
+- `apps/server/.env`
+- `apps/web/.env.local`
+
+Then run:
+
+```bash
+npm run db:push
+npm run dev:server
+```
+
+In a second terminal:
+
+```bash
+npm run dev:web
+```
+
+Open:
+
+```text
+http://localhost:3001/sessions/record
+```
+
+## How To Test
+
+### Basic recording
+
+1. Open `/sessions/record`
+2. Start recording from microphone
+3. Speak for 20 to 30 seconds
+4. Stop recording
+5. Open the saved session
+6. Confirm:
+   - chunk files are listed
+   - transcript text appears
+
+### OPFS recovery
+
+1. Start recording
+2. Wait for at least one chunk
+3. Kill backend
+4. Keep recording for one more chunk interval
+5. Restart backend
+6. Wait up to 15 seconds
+7. Confirm missing chunks upload automatically
+
+### Filesystem verification
+
+Uploaded files are written to:
+
+```text
+apps/server/uploads/<sessionId>/
+```
+
+## Important Notes
+
+- Old broken sessions from earlier experiments may still show old errors
+- Use a fresh new recording after code changes when testing
+- The backend must stay running while uploads happen
+- If port `3000` is already in use, kill the old process before starting a new backend
+
+## Useful Commands
+
+Check backend:
+
+```bash
+curl http://localhost:3000
+```
+
+Check sessions:
+
+```bash
+curl http://localhost:3000/api/sessions
+```
+
+Start frontend only:
+
+```bash
+npm run dev:web
+```
+
+Start backend only:
+
+```bash
+npm run dev:server
+```
+
+Type check:
+
+```bash
+npm run check-types
+```
+
+Build:
+
+```bash
+npm run build
+```
+
+## Git / Push
+
+Suggested git flow:
+
+```bash
+git status
+git add .
+git commit -m "Build local-first reliable recording and transcription pipeline"
+git push origin <your-branch>
+```
+
+## Vercel
+
+Recommended Vercel use for this repo:
+
+- Deploy `apps/web` only
+- Set root directory to `apps/web`
+- Set environment variable:
+
+```env
+NEXT_PUBLIC_SERVER_URL=https://your-backend-url
+```
+
+Do **not** expect the current backend to work on Vercel as-is because:
+
+- local filesystem uploads are not persistent there
+- local Python Whisper processing is not suitable for Vercel serverless/runtime limits
+
+For production deployment, host the backend separately and keep Vercel for the frontend.
