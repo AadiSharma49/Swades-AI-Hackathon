@@ -256,9 +256,10 @@ Recommended Vercel use for this repo:
 NEXT_PUBLIC_SERVER_URL=https://your-backend-url
 ```
 
-Do **not** expect the current backend to work on Vercel as-is because:
+<img width="1919" height="941" alt="Screenshot 2026-04-05 163638" src="https://github.com/user-attachments/assets/b43668f7-c79a-47f9-b067-14894dd8a73c" />
 
-- local filesystem uploads are not persistent there
-- local Python Whisper processing is not suitable for Vercel serverless/runtime limits
+<img width="1903" height="938" alt="image" src="https://github.com/user-attachments/assets/b351c6c7-684d-47ac-a6dc-7ab081f3cf5d" />
 
-For production deployment, host the backend separately and keep Vercel for the frontend.
+<img width="1919" height="942" alt="Screenshot 2026-04-05 163648" src="https://github.com/user-attachments/assets/f33115ba-7b6f-4d6e-9c34-b10151481fff" />
+
+
